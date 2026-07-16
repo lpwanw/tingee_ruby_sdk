@@ -1,8 +1,12 @@
 # Tingee BaaS — verified API reference
 
+Official documentation: **https://developers.tingee.vn/docs/banking/**
+
 Everything here was **observed against the live production API (2026-07-16)**, not
-copied from Tingee's website. Claims marked `NOT OBSERVED` are unverified. This is
-the contract `Tingee::Client` and `Tingee::Signature` are built against.
+copied from the docs above. Claims marked `NOT OBSERVED` are unverified. This is
+the contract `Tingee::Client` and `Tingee::Signature` are built against. Where
+this file and the official docs disagree, this file records what the API
+actually did; re-verify against the live API before trusting either.
 
 Redaction: account numbers → last 4, no identity/CCCD, no mobile numbers, no
 client_id/secret_token, no payer PII from memos.

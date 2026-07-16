@@ -7,8 +7,9 @@ agent or a developer with zero prior context — follow it top to bottom.
 Distilled from a production Rails integration (multi-tenant invoicing app,
 2026-07). Rails examples throughout, but every rule is framework-agnostic; the
 Rails-specific parts are marked. API-level facts live in
-[`tingee-api-reference.md`](tingee-api-reference.md) — this file is the
-app-side architecture.
+[`tingee-api-reference.md`](tingee-api-reference.md) (official docs:
+[developers.tingee.vn/docs/banking](https://developers.tingee.vn/docs/banking/)) —
+this file is the app-side architecture.
 
 ## What you're building
 

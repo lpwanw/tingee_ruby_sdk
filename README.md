@@ -2,6 +2,7 @@
 
 Ruby client for the [Tingee](https://tingee.vn) BaaS API (`open-api.tingee.vn`) —
 bank account linking, virtual accounts, and payment webhooks for Vietnamese banks.
+Official API docs: [developers.tingee.vn/docs/banking](https://developers.tingee.vn/docs/banking/).
 
 - **Pure Ruby, zero runtime dependencies.** `net/http`, `openssl`, `json` only. No
   Rails required (enforced by a boundary test).
