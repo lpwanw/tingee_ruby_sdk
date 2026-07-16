@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+# IRB with the gem loaded — live-API poking without a Rails app.
+#
+#   TINGEE_CLIENT_ID=… TINGEE_SECRET_TOKEN=… bin/console
+#   > client = Tingee::Client.new
+#   > client.get_banks
+require_relative "../lib/tingee"
+
+Tingee.configure do |c|
+  c.client_id    = ENV["TINGEE_CLIENT_ID"]
+  c.secret_token = ENV["TINGEE_SECRET_TOKEN"]
+  c.base_url     = ENV["TINGEE_BASE_URL"] if ENV["TINGEE_BASE_URL"]
+end
+
+require "irb"
+IRB.start(__FILE__)

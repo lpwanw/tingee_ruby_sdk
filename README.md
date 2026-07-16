@@ -13,9 +13,17 @@ bank account linking, virtual accounts, and payment webhooks for Vietnamese bank
 
 ## Installation
 
+Not published to RubyGems yet — install from GitHub:
+
 ```ruby
 # Gemfile
-gem "tingee_ruby_sdk"
+gem "tingee_ruby_sdk", github: "lpwanw/tingee_ruby_sdk"
+```
+
+Or from a local checkout:
+
+```ruby
+gem "tingee_ruby_sdk", path: "../tingee_ruby_sdk"
 ```
 
 ## Configuration
@@ -192,6 +200,17 @@ All handled by the gem; listed here so you don't fight them when debugging.
 ```bash
 bundle install
 bundle exec rake test
+```
+
+### Poking the live API
+
+Rails apps: `bin/rails console` (with the initializer set) — `Tingee::Client.new.get_banks`.
+Without Rails:
+
+```bash
+TINGEE_CLIENT_ID=… TINGEE_SECRET_TOKEN=… bin/console
+> client = Tingee::Client.new
+> client.get_banks
 ```
 
 One test reproduces a real captured signature and only runs when
