@@ -19,7 +19,7 @@ app-side architecture.
 3. **Match**: your app routes the webhook to the right account/tenant, matches it
    to an open invoice/order (memo + exact amount), and marks it paid.
 4. **Unlink**: reverses the link — also the ONLY way to stop Tingee's
-   per-webhook billing (~150đ each, matched or not).
+   per-webhook billing (every delivered webhook bills, matched or not).
 
 ## 0. Prerequisites
 

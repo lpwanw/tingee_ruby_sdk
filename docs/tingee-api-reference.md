@@ -235,8 +235,8 @@ normalized to code `"NETWORK"`, non-JSON gateway/WAF pages to `"HTTP_<status>"`.
 
 ## 9. Operational notes
 
-- **Billing: ~150đ per delivered webhook** (per Tingee's pricing at verification
-  time). Delivered ≠ matched — unroutable webhooks still bill. Whether retries
+- **Billing is per delivered webhook** (check Tingee's current pricing).
+  Delivered ≠ matched — unroutable webhooks still bill. Whether retries
   bill: `NOT OBSERVED` (ask support).
 - Disabling your own feature flags does NOT stop the meter — **only unlinking
   (`delete-va` chain) stops webhook billing** for an account.
