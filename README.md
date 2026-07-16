@@ -11,6 +11,12 @@ bank account linking, virtual accounts, and payment webhooks for Vietnamese bank
   quirks and known bugs, lives in [`docs/tingee-api-reference.md`](docs/tingee-api-reference.md).
 - **Only verified endpoints are wrapped** — no speculative "complete SDK".
 
+> **Building the full auto-confirm feature?** Follow
+> [`docs/bank-auto-confirm-integration-guide.md`](docs/bank-auto-confirm-integration-guide.md) —
+> a complete app-side playbook (data model, link state machine, webhook endpoint,
+> payment matching, go-live checklist) distilled from a production integration.
+> Written so you can hand the link to an AI coding agent and it knows what to build.
+
 ## Installation
 
 Not published to RubyGems yet — install from GitHub:
