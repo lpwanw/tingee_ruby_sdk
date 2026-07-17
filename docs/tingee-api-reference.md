@@ -102,6 +102,10 @@ fully verified.
 
 ## 3. Manual link chain — create-va → confirm-va (LIVE, works end-to-end)
 
+> VCB personal accounts use a different `create-va` shape: a deepLink instead of an
+> OTP confirm, result via webhook. See [tingee-vcb-personal-link.md](./tingee-vcb-personal-link.md)
+> (`Client#create_va_vcb`).
+
 Bypasses the hosted SDK. Verified flow (Sacombank, real account):
 
 1. `POST /v1/create-va`
@@ -159,9 +163,24 @@ Tingee is inconsistent between these two — verified live:
   (e.g. `"STB"`), NOT the BIN. The bodyless-signing convention still applies (the
   signed string is `"{}"`). → `data: {confirmId}`.
 - `POST /v1/confirm-delete-va` — params ride the **BODY**:
-  `{bankName, confirmId, otpNumber}`.
+  `{bankBin, confirmId, otpNumber}`. Here the bank is keyed by its **BIN**
+  (e.g. `"970403"`), NOT the code — passing `bankName` is ignored and Tingee
+  fails with `"Lỗi hệ thống phương thức xác thực"` (seen live 2026-07-17).
 
 Unlinking is also how per-webhook billing stops for an account (see §9).
+
+## 6b. transaction/get-paging — transaction history (DOC, not yet live-verified)
+
+`POST /v1/transaction/get-paging` → `data: {totalCount, items}`. Body:
+
+- `startTime`, `endTime` — **required**, format `"yyyyMMddHHmmss"` (UTC+7). Each
+  request may span at most a **10-day** window (Tingee errors past that).
+- Optional: `filter` (keyword — tx code/content), `skipCount`, `maxResultCount`,
+  `merchantId` (required for a Master Merchant), `shopIds[]`, `vaAccountNumbers[]`,
+  `bankBin`.
+
+Item shape (per the docs): `{transactionId, accountNumber, amount, type
+(CREDIT/DEBIT), bankBin, bankName, transactionTime, description}`.
 
 ## 7. Webhooks
 

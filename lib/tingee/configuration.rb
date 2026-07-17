@@ -2,7 +2,10 @@ module Tingee
   # Injected credentials — set via Tingee.configure (e.g. from a Rails initializer);
   # this layer never reads any credential store itself.
   class Configuration
-    attr_accessor :client_id, :secret_token, :base_url
+    # shop_id: every VA this app creates is grouped under one Tingee shop
+    # (one shop per project). Optional: nil sends no shopId and Tingee
+    # auto-creates a throwaway shop per link.
+    attr_accessor :client_id, :secret_token, :base_url, :shop_id
 
     def initialize
       @base_url = "https://open-api.tingee.vn"

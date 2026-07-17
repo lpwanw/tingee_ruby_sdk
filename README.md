@@ -43,6 +43,8 @@ Tingee.configure do |c|
   c.client_id    = ENV["TINGEE_CLIENT_ID"]      # or Rails credentials, etc.
   c.secret_token = ENV["TINGEE_SECRET_TOKEN"]
   # c.base_url = "https://open-api.tingee.vn"   # default (production)
+  # c.shop_id  = 252011  # optional: group every VA under ONE Tingee shop (one shop
+                         # per project); unset, Tingee auto-creates a shop per link
 end
 ```
 
@@ -107,6 +109,29 @@ r = client.register_notify(bank_bin: "970416", va_account_number: link["vaAccoun
 client.confirm_register_notify(bank_bin: "970416", confirm_id: r["confirmId"], otp_number: "654321")
 ```
 
+### Bank linking — VCB personal account (deepLink flow)
+
+VCB has **no OTP confirm step**. `create_va_vcb` returns a `deepLink` you open in VCB
+Digibank; the customer confirms there and the result arrives **asynchronously on your
+webhook** with `status: "confirm-va-success" | "confirm-va-failed"`. See
+[docs/tingee-vcb-personal-link.md](docs/tingee-vcb-personal-link.md).
+
+```ruby
+# Pass and STORE your own request_id — it's echoed back on the webhook to correlate.
+data = client.create_va_vcb(
+  request_id:     my_link_id,            # defaults to SecureRandom.uuid if omitted
+  account_number: "0912323232",
+  mobile:         "0987665555",
+  merchant_id:    140998,
+  redirect_url:   "finonemerchant://",   # deep-link back to your app after confirm
+  webhook_url:    "https://yourapp.com/webhooks/tingee"
+)
+data.first["deepLink"] # "vcbpartner://linkPaymentEvent?token=…" — open in VCB Digibank
+
+# Later, on your webhook (verify the signature first — see below):
+#   payload["status"] == "confirm-va-success" → payload["vaAccountNumber"] is now linked
+```
+
 ### Listing linked accounts
 
 ```ruby
@@ -117,9 +142,21 @@ client.get_va_paging # => {"totalCount"=>1, "items"=>[{"vaAccountNumber"=>"TNG�
 
 ```ruby
 # Note Tingee's inconsistency: delete-va takes QUERY params and the bank's short
-# CODE ("STB"), not the BIN; confirm-delete-va takes a JSON BODY. The gem handles it.
+# CODE ("STB"); confirm-delete-va takes a JSON BODY and identifies the bank by its
+# BIN ("970403"), not the code — bankName is ignored there. The gem handles it.
 r = client.delete_va(bank_name: "STB", va_account_number: "TNG…")
-client.confirm_delete_va(bank_name: "STB", confirm_id: r["confirmId"], otp_number: "111111")
+client.confirm_delete_va(bank_bin: "970403", confirm_id: r["confirmId"], otp_number: "111111")
+```
+
+### Transaction history
+
+```ruby
+# start_time/end_time are required ("yyyyMMddHHmmss", UTC+7); max 10-day window.
+client.get_transactions(start_time: "20260701000000", end_time: "20260710235959")
+# => {"totalCount"=>100, "items"=>[{"transactionId"=>…, "amount"=>100000, "type"=>"CREDIT", …}]}
+
+# Optional filters: filter (keyword), skip_count, max_result_count, merchant_id,
+# shop_ids, va_account_numbers, bank_bin.
 ```
 
 Unlinking is also how you stop Tingee's per-webhook billing for an account.

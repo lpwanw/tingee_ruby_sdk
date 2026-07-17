@@ -253,7 +253,9 @@ Mirror of linking, same state machine and job (`start_delete_va` →
 - `delete_va` is slow too (it triggers the bank-side detach + OTP send) — run it
   in the job, show the verifying spinner until the OTP form appears.
 - `delete_va` takes the bank's short **CODE** (`"STB"`), not the BIN — keep a
-  BIN→code map from `get_banks`.
+  BIN→code map from `get_banks`. But `confirm_delete_va` is the opposite: it keys
+  the bank by **BIN** (`"970403"`), and passing the code is ignored (Tingee then
+  fails with `"Lỗi hệ thống phương thức xác thực"`, seen live 2026-07-17).
 - On confirmed unlink: clear all `tingee_*` fields AND the test-verified stamp
   (a re-link needs fresh proof).
 - **Business rule**: disabling your feature flag does NOT stop Tingee's meter —

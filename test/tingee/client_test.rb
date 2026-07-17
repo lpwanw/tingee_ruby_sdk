@@ -3,7 +3,7 @@ require "test_helper"
 module Tingee
   class ClientTest < Minitest::Test
     # Fake config so tests never need real credentials.
-    FakeConfig = Data.define(:client_id, :secret_token, :base_url) do
+    FakeConfig = Data.define(:client_id, :secret_token, :base_url, :shop_id) do
       def validate! = nil
     end
 
@@ -13,8 +13,8 @@ module Tingee
     class FakeClient < Client
       attr_reader :requests
 
-      def initialize(*responses)
-        super(FakeConfig.new(client_id: "cid", secret_token: "sec", base_url: "https://open-api.tingee.vn"))
+      def initialize(*responses, shop_id: nil)
+        super(FakeConfig.new(client_id: "cid", secret_token: "sec", base_url: "https://open-api.tingee.vn", shop_id:))
         @responses = responses
         @requests = []
       end
@@ -77,7 +77,7 @@ module Tingee
     end
 
     def test_read_timeout_is_overridable_per_client_web_default_stays_90
-      config = FakeConfig.new(client_id: "cid", secret_token: "sec", base_url: "https://open-api.tingee.vn")
+      config = FakeConfig.new(client_id: "cid", secret_token: "sec", base_url: "https://open-api.tingee.vn", shop_id: nil)
       assert_equal 90, Client.new(config).instance_variable_get(:@read_timeout)
       assert_equal 300, Client.new(config, read_timeout: 300).instance_variable_get(:@read_timeout)
     end
@@ -102,6 +102,28 @@ module Tingee
       assert_equal "970403", body["bankBin"]
       assert_equal false, body["isNotifyAccountNumber"] # verified-working mode (real transfer fired the webhook)
       assert_equal "0393203261", body["mobile"] # domestic 0-prefixed, never 84-prefixed
+    end
+
+    def test_create_va_carries_the_configured_shop_id_omits_it_when_unset
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":{"confirmId":"123"}}'), shop_id: 252011)
+      c.create_va(bank_bin: "970403", account_number: "0011", account_name: "LE PHUONG TAY",
+        identity: "012345678901", mobile: "0393203261", webhook_url: "https://example.com/webhooks/tingee")
+      assert_equal 252011, JSON.parse(c.requests.first[:body])["shopId"]
+
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":{"confirmId":"123"}}'))
+      c.create_va(bank_bin: "970403", account_number: "0011", account_name: "LE PHUONG TAY",
+        identity: "012345678901", mobile: "0393203261", webhook_url: "https://example.com/webhooks/tingee")
+      refute JSON.parse(c.requests.first[:body]).key?("shopId")
+    end
+
+    def test_create_va_vcb_falls_back_to_the_configured_shop_id_explicit_arg_wins
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[]}'), shop_id: 252011)
+      c.create_va_vcb(account_number: "0912323232", mobile: "0987665555", request_id: "req-3")
+      assert_equal 252011, JSON.parse(c.requests.first[:body])["shopId"]
+
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[]}'), shop_id: 252011)
+      c.create_va_vcb(account_number: "0912323232", mobile: "0987665555", request_id: "req-4", shop_id: 999)
+      assert_equal 999, JSON.parse(c.requests.first[:body])["shopId"]
     end
 
     def test_confirm_va_sends_the_otp_and_returns_the_real_account_and_routing_key
@@ -140,12 +162,68 @@ module Tingee
       assert_equal "{}", c.requests.first[:body] # bodyless signing convention still applies
     end
 
-    def test_confirm_delete_va_sends_bank_name_confirm_id_and_otp_number_in_the_body
+    def test_confirm_delete_va_sends_bank_bin_confirm_id_and_otp_number_in_the_body
       c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":null}'))
-      c.confirm_delete_va(bank_name: "STB", confirm_id: "789", otp_number: "222222")
+      c.confirm_delete_va(bank_bin: "970403", confirm_id: "789", otp_number: "222222")
 
       body = JSON.parse(c.requests.first[:body])
-      assert_equal({ "bankName" => "STB", "confirmId" => "789", "otpNumber" => "222222" }, body)
+      assert_equal({ "bankBin" => "970403", "confirmId" => "789", "otpNumber" => "222222" }, body)
+    end
+
+    def test_get_transactions_sends_only_the_required_time_window_when_no_filters_given
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":{"totalCount":0,"items":[]}}'))
+      c.get_transactions(start_time: "20260701000000", end_time: "20260710235959")
+
+      body = JSON.parse(c.requests.first[:body])
+      assert_equal({ "startTime" => "20260701000000", "endTime" => "20260710235959" }, body)
+    end
+
+    def test_get_transactions_includes_optional_filters_and_arrays_when_given
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":{"totalCount":0,"items":[]}}'))
+      c.get_transactions(start_time: "20260701000000", end_time: "20260710235959",
+                         filter: "abc", skip_count: 0, max_result_count: 20,
+                         va_account_numbers: "TNG1", bank_bin: "970403")
+
+      body = JSON.parse(c.requests.first[:body])
+      assert_equal({
+        "startTime" => "20260701000000", "endTime" => "20260710235959",
+        "filter" => "abc", "skipCount" => 0, "maxResultCount" => 20,
+        "vaAccountNumbers" => [ "TNG1" ], "bankBin" => "970403"
+      }, body)
+    end
+
+    def test_create_va_vcb_sends_the_vcb_defaults_and_no_otp_fields
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[{"confirmId":"r1","deepLink":"vcbpartner://x"}]}'))
+      data = c.create_va_vcb(account_number: "0912323232", mobile: "0987665555", request_id: "req-1")
+
+      body = JSON.parse(c.requests.first[:body])
+      assert_equal({
+        "requestId" => "req-1", "bankName" => "VCB", "accountNumber" => "0912323232",
+        "accountType" => "personal-account", "mobile" => "0987665555", "appType" => "baas"
+      }, body)
+      assert_equal [ { "confirmId" => "r1", "deepLink" => "vcbpartner://x" } ], data
+    end
+
+    def test_create_va_vcb_defaults_request_id_to_a_uuid_when_omitted
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[]}'))
+      c.create_va_vcb(account_number: "0912323232", mobile: "0987665555")
+
+      request_id = JSON.parse(c.requests.first[:body])["requestId"]
+      assert_match(/\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/, request_id)
+    end
+
+    def test_create_va_vcb_includes_optional_merchant_and_url_fields_when_given
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[]}'))
+      c.create_va_vcb(account_number: "0912323232", mobile: "0987665555", request_id: "req-2",
+                      merchant_id: 140998, merchant_name: "Cửa hàng số 1", merchant_address: "Hà Nội",
+                      redirect_url: "finonemerchant://", webhook_url: "https://app/hook")
+
+      body = JSON.parse(c.requests.first[:body])
+      assert_equal 140998, body["merchantId"]
+      assert_equal "Cửa hàng số 1", body["merchantName"]
+      assert_equal "Hà Nội", body["merchantAddress"]
+      assert_equal "finonemerchant://", body["redirectUrl"]
+      assert_equal "https://app/hook", body["webhookUrl"]
     end
   end
 end

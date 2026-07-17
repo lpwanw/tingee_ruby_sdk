@@ -1,6 +1,7 @@
 require "net/http"
 require "json"
 require "uri"
+require "securerandom"
 
 module Tingee
   # HTTP + endpoint methods. Only live-verified endpoints are wrapped — no
@@ -53,13 +54,44 @@ module Tingee
     # do not switch the default to true without a real-transfer test on a true link.
     def create_va(bank_bin:, account_number:, account_name:, identity:, mobile:, webhook_url:,
                    account_type: "personal-account", is_notify_account_number: false)
-      post("/v1/create-va", {
+      payload = {
         accountType: account_type, bankBin: bank_bin,
         accountNumber: account_number, accountName: account_name,
         identity: identity, mobile: mobile,
         isNotifyAccountNumber: is_notify_account_number,
         webhookUrl: webhook_url
-      })
+      }
+      payload[:shopId] = @config.shop_id if @config.shop_id
+      post("/v1/create-va", payload)
+    end
+
+    # POST /v1/create-va — VCB personal-account variant (docs/tingee-vcb-personal-link.md).
+    # UNLIKE create_va above, VCB has no OTP confirm step: it returns a `deepLink`
+    # (vcbpartner://…) you open in VCB Digibank; the customer confirms there and the
+    # RESULT arrives asynchronously on your webhook_url as a webhook with
+    # status "confirm-va-success" | "confirm-va-failed".
+    #
+    # request_id is echoed back on that webhook — pass and STORE your own to correlate
+    # (defaults to a fresh UUID otherwise). Optional params are only sent when given.
+    # Returns Tingee's data payload, an array: [{confirmId, deepLink}].
+    def create_va_vcb(account_number:, mobile:, request_id: SecureRandom.uuid, bank_name: "VCB",
+                      merchant_id: nil, merchant_name: nil, merchant_address: nil, shop_id: nil,
+                      redirect_url: nil, webhook_url: nil, va_prefix: nil, va_suffix: nil,
+                      app_type: "baas", account_type: "personal-account")
+      payload = {
+        requestId: request_id, bankName: bank_name, accountNumber: account_number,
+        accountType: account_type, mobile: mobile, appType: app_type
+      }
+      payload[:merchantId]      = merchant_id      if merchant_id
+      payload[:merchantName]    = merchant_name    if merchant_name
+      shop_id ||= @config.shop_id # one shop per project — same grouping as create_va
+      payload[:merchantAddress] = merchant_address if merchant_address
+      payload[:shopId]          = shop_id          if shop_id
+      payload[:redirectUrl]     = redirect_url     if redirect_url
+      payload[:webhookUrl]      = webhook_url      if webhook_url
+      payload[:vaPrefix]        = va_prefix        if va_prefix
+      payload[:vaSuffix]        = va_suffix        if va_suffix
+      post("/v1/create-va", payload)
     end
 
     # POST /v1/confirm-va — finishes the link with the bank's OTP. Returns
@@ -87,9 +119,28 @@ module Tingee
     end
 
     # POST /v1/confirm-delete-va — finishes the unlink with the bank's OTP. Params
-    # ride the BODY this time (unlike delete_va's query string above).
-    def confirm_delete_va(bank_name:, confirm_id:, otp_number:)
-      post("/v1/confirm-delete-va", { bankName: bank_name, confirmId: confirm_id, otpNumber: otp_number })
+    # ride the BODY this time (unlike delete_va's query string above), and the bank
+    # is identified by bankBin here — bankName gets ignored and Tingee then fails
+    # with "Lỗi hệ thống phương thức xác thực" (seen live 2026-07-17).
+    def confirm_delete_va(bank_bin:, confirm_id:, otp_number:)
+      post("/v1/confirm-delete-va", { bankBin: bank_bin, confirmId: confirm_id, otpNumber: otp_number })
+    end
+
+    # POST /v1/transaction/get-paging — transaction history. `start_time`/`end_time`
+    # are required, format "yyyyMMddHHmmss" (UTC+7); Tingee caps each query at a
+    # 10-day window (over that it returns an error — not enforced here). Optional
+    # params are only sent when given. Returns {totalCount, items}.
+    def get_transactions(start_time:, end_time:, filter: nil, skip_count: nil, max_result_count: nil,
+                         merchant_id: nil, shop_ids: nil, va_account_numbers: nil, bank_bin: nil)
+      payload = { startTime: start_time, endTime: end_time }
+      payload[:filter]           = filter                   if filter
+      payload[:skipCount]        = skip_count               if skip_count
+      payload[:maxResultCount]   = max_result_count         if max_result_count
+      payload[:merchantId]       = merchant_id              if merchant_id
+      payload[:shopIds]          = Array(shop_ids)          if shop_ids
+      payload[:vaAccountNumbers] = Array(va_account_numbers) if va_account_numbers
+      payload[:bankBin]          = bank_bin                 if bank_bin
+      post("/v1/transaction/get-paging", payload)
     end
 
     private
