@@ -102,9 +102,14 @@ fully verified.
 
 ## 3. Manual link chain — create-va → confirm-va (LIVE, works end-to-end)
 
-> VCB personal accounts use a different `create-va` shape: a deepLink instead of an
-> OTP confirm, result via webhook. See [tingee-vcb-personal-link.md](./tingee-vcb-personal-link.md)
-> (`Client#create_va_vcb`).
+> **Redirect-authorize banks (VCB, TPB) use the same endpoint with a different
+> shape:** add `appType:"baas"` + `redirectUrl` and create-va answers with an
+> authorize link (`deepLink` for VCB, `authorizeLink` for TPB) instead of sending an
+> OTP. There is no confirm-va step — the result arrives on your webhook as
+> `status:"confirm-va-success"|"confirm-va-failed"` (§7). Pass your own `requestId`:
+> it is echoed back on that webhook, and **TPB returns no `confirmId` at all**, so it
+> is the only correlation key. One `Client#create_va` covers all shapes; unset params
+> are omitted from the payload.
 
 Bypasses the hosted SDK. Verified flow (Sacombank, real account):
 
@@ -140,8 +145,7 @@ confirm-va returns BOTH:
   handle**, NOT a transferable account. Store it as your unique routing key for
   webhooks.
 
-Also store `bankBin` and `shopId` from the response if you need them later
-(`delete-va` needs the bank's short CODE, resolvable from get-banks by BIN).
+Also store `bankBin` and `shopId` from the response — `delete-va` needs the BIN.
 
 ## 4. register-notify — ACB only (LIVE contract)
 
@@ -156,16 +160,24 @@ second OTP.
 
 ## 6. Unlink — delete-va → confirm-delete-va (LIVE)
 
-Tingee is inconsistent between these two — verified live:
+Tingee is inconsistent about *where* the params ride, but both key the bank by
+**BIN** — verified live:
 
 - `POST /v1/delete-va` — params ride the **QUERY STRING** (not the JSON body):
-  `?bankName=STB&vaAccountNumber=TNG…`. `bankName` is Tingee's short bank **CODE**
-  (e.g. `"STB"`), NOT the BIN. The bodyless-signing convention still applies (the
-  signed string is `"{}"`). → `data: {confirmId}`.
+  `?bankBin=970403&vaAccountNumber=TNG…`. The bodyless-signing convention still
+  applies (the signed string is `"{}"`). → `data: {confirmId}`.
 - `POST /v1/confirm-delete-va` — params ride the **BODY**:
-  `{bankBin, confirmId, otpNumber}`. Here the bank is keyed by its **BIN**
-  (e.g. `"970403"`), NOT the code — passing `bankName` is ignored and Tingee
-  fails with `"Lỗi hệ thống phương thức xác thực"` (seen live 2026-07-17).
+  `{bankBin, confirmId, otpNumber}`.
+
+**Trap (2026-07-17):** a `?bankName=STB` variant of delete-va *appears* to work — it
+returns a `confirmId` and the bank really does send an OTP — but the session it opens
+is unconfirmable: confirm-delete-va then fails with
+`"Lỗi hệ thống phương thức xác thực"`. The failure surfaces one step later than the
+mistake, which is what makes it costly to diagnose. Use the BIN on both calls.
+
+Response shape varies by bank: OTP banks return `{confirmId}`, TPB returns an
+`authorizeLink` (owner approves at the bank; a `delete-va-success` webhook finishes
+it), and VCB returns `{}` — already detached, nothing to confirm.
 
 Unlinking is also how per-webhook billing stops for an account (see §9).
 
@@ -206,6 +218,28 @@ Field semantics (all confirmed real):
 
 **A plain bank transfer (any VietQR / manual transfer into the real account) fires
 the webhook** — no Tingee-minted QR required. Verified with a real transfer.
+
+### Bank-link result callback (redirect-authorize banks)
+
+Redirect-authorize banks (VCB, TPB) have no confirm-va step — the link's outcome
+arrives here instead, on the same endpoint as payments:
+
+```json
+{"requestId":"<the requestId YOU sent to create-va>","status":"confirm-va-success",
+ "vaAccountNumber":"TNG…","accountNumber":"<real acct>","accountName":"NGUYEN VAN A"}
+```
+
+- `status` — `confirm-va-success` | `confirm-va-failed` | `delete-va-success`.
+- **Distinguish it from a payment by SHAPE**: a link result has `status` and NO
+  `transactionCode`; a payment has `transactionCode` and no `status`. The two are
+  disjoint, so branch on that rather than guessing from other fields.
+- Correlate on `requestId` — it echoes the one you sent to create-va. VCB echoes it
+  as `confirmId` in the create-va response too; **TPB returns no confirmId at all**,
+  so your own `requestId` is the only key that works for both.
+- Unlike confirm-va, this payload DOES echo `accountName` — prefer it over whatever
+  the owner typed.
+- `delete-va-success` is best matched on `vaAccountNumber` (authoritative for "which
+  account just detached"); its `requestId` echo is unverified.
 
 ### Signature verification (LIVE — raw bytes, resolved 2026-07-16)
 
