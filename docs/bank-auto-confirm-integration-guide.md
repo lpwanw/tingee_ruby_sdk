@@ -252,10 +252,14 @@ Mirror of linking, same state machine and job (`start_delete_va` →
 
 - `delete_va` is slow too (it triggers the bank-side detach + OTP send) — run it
   in the job, show the verifying spinner until the OTP form appears.
-- `delete_va` takes the bank's short **CODE** (`"STB"`), not the BIN — keep a
-  BIN→code map from `get_banks`. But `confirm_delete_va` is the opposite: it keys
-  the bank by **BIN** (`"970403"`), and passing the code is ignored (Tingee then
-  fails with `"Lỗi hệ thống phương thức xác thực"`, seen live 2026-07-17).
+- Both `delete_va` and `confirm_delete_va` key the bank by **BIN** (`"970403"`).
+  Passing the short code (`bankName: "STB"`) to `delete_va` returns a `confirmId`
+  and fires the bank's OTP, but opens a session `confirm_delete_va` cannot confirm —
+  it fails with `"Lỗi hệ thống phương thức xác thực"` (live, 2026-07-17). The error
+  surfaces one step after the mistake, which is what makes it costly to diagnose.
+- `delete_va`'s response shape varies by bank: `{confirmId}` (OTP banks, show the OTP
+  form), an `authorizeLink` (TPB — owner approves at the bank, a `delete-va-success`
+  webhook finishes it), or `{}` (VCB — already detached, finish locally now).
 - On confirmed unlink: clear all `tingee_*` fields AND the test-verified stamp
   (a re-link needs fresh proof).
 - **Business rule**: disabling your feature flag does NOT stop Tingee's meter —
@@ -291,7 +295,7 @@ Mirror of linking, same state machine and job (`start_delete_va` →
 | 5 | Ack-before-match means the match job MUST retry — Tingee never resends an acked txn. |
 | 6 | Idempotency = DB unique index on `transactionCode`, rescue the duplicate error with an ack. |
 | 7 | Blank `vaAccountNumber` must route nowhere — guard the nil-column lookup. |
-| 8 | `delete_va`: query-string params + bank CODE not BIN (the gem handles the transport; you supply the code). |
+| 8 | `delete_va`: query-string params, keyed by **BIN**. The `bankName` variant returns a confirmId and sends an OTP but opens an unconfirmable session — confirm-delete-va then 400s. |
 | 9 | ACB needs `register_notify` (second OTP) — register BEFORE persisting the link. |
 | 10 | `mobile` domestic `0`-prefix; never persist identity/mobile/OTP; never store raw memos (PII). |
 | 11 | Exact-amount re-check under the invoice row lock. |

@@ -1,7 +1,6 @@
 require "net/http"
 require "json"
 require "uri"
-require "securerandom"
 
 module Tingee
   # HTTP + endpoint methods. Only live-verified endpoints are wrapped — no
@@ -41,56 +40,59 @@ module Tingee
       post("/v1/get-va-paging", payload)
     end
 
-    # POST /v1/create-va — starts a manual bank link (the raw API chain, usable when
-    # Tingee's hosted JS SDK is unavailable or broken — docs/tingee-api-reference.md
-    # §create-va, live-verified). The bank then sends/pushes an OTP to `mobile`.
-    # Returns {confirmId, otpMethod}. `identity`/`mobile` should never be persisted
-    # by the caller.
+    # POST /v1/create-va — starts a bank link (the raw API chain, usable when Tingee's
+    # hosted JS SDK is unavailable or broken — docs/tingee-api-reference.md §create-va,
+    # live-verified). ONE method serves all three bank shapes; which one you get is
+    # decided by the bank, not by a different endpoint:
+    #
+    #   OTP banks (STB, ACB, MBB, …) — pass account_number/account_name/identity/mobile.
+    #     The bank sends/pushes an OTP to `mobile`. Returns {confirmId, otpMethod};
+    #     finish with #confirm_va.
+    #   Redirect-authorize banks (VCB) — additionally pass app_type: "baas" +
+    #     redirect_url + request_id. Returns an authorizeLink/deepLink instead of
+    #     sending an OTP; the owner confirms in the bank's app and the result arrives
+    #     asynchronously on webhook_url as {status: "confirm-va-success"|"confirm-va-failed"}.
+    #     There is NO confirm_va step for these.
+    #   No-account-field banks (TPB, doc-sourced) — pass neither account nor identity
+    #     fields; the owner picks the account on the bank's own web. TPB returns NO
+    #     confirmId at all, so the request_id YOU send is the only key that can
+    #     correlate the settle webhook back to your pending request. Always pass and
+    #     STORE your own request_id for any redirect-authorize flow.
+    #
+    # Every optional field is omitted from the payload when nil, so a bank only ever
+    # receives the params its contract actually defines (VCB tolerates and overrides
+    # what it doesn't use — verified live; TPB's contract has none of them).
     #
     # is_notify_account_number: FALSE is the DEFAULT because it is the mode proved
     # end-to-end — a real VietQR transfer to the linked real account fired the webhook
     # on a notify=false link (2026-07-16). notify=true is documented as "watch the real
     # account" and MAY also work, but was never confirmed to fire on a plain transfer;
     # do not switch the default to true without a real-transfer test on a true link.
-    def create_va(bank_bin:, account_number:, account_name:, identity:, mobile:, webhook_url:,
-                   account_type: "personal-account", is_notify_account_number: false)
+    def create_va(bank_bin:, webhook_url:, account_number: nil, account_name: nil,
+                   identity: nil, mobile: nil, account_type: "personal-account",
+                   is_notify_account_number: false, app_type: nil, redirect_url: nil,
+                   request_id: nil, merchant_id: nil, merchant_name: nil,
+                   merchant_address: nil, shop_id: nil, va_prefix: nil, va_suffix: nil)
       payload = {
         accountType: account_type, bankBin: bank_bin,
-        accountNumber: account_number, accountName: account_name,
-        identity: identity, mobile: mobile,
         isNotifyAccountNumber: is_notify_account_number,
         webhookUrl: webhook_url
       }
-      payload[:shopId] = @config.shop_id if @config.shop_id
-      post("/v1/create-va", payload)
-    end
-
-    # POST /v1/create-va — VCB personal-account variant (docs/tingee-vcb-personal-link.md).
-    # UNLIKE create_va above, VCB has no OTP confirm step: it returns a `deepLink`
-    # (vcbpartner://…) you open in VCB Digibank; the customer confirms there and the
-    # RESULT arrives asynchronously on your webhook_url as a webhook with
-    # status "confirm-va-success" | "confirm-va-failed".
-    #
-    # request_id is echoed back on that webhook — pass and STORE your own to correlate
-    # (defaults to a fresh UUID otherwise). Optional params are only sent when given.
-    # Returns Tingee's data payload, an array: [{confirmId, deepLink}].
-    def create_va_vcb(account_number:, mobile:, request_id: SecureRandom.uuid, bank_name: "VCB",
-                      merchant_id: nil, merchant_name: nil, merchant_address: nil, shop_id: nil,
-                      redirect_url: nil, webhook_url: nil, va_prefix: nil, va_suffix: nil,
-                      app_type: "baas", account_type: "personal-account")
-      payload = {
-        requestId: request_id, bankName: bank_name, accountNumber: account_number,
-        accountType: account_type, mobile: mobile, appType: app_type
-      }
+      payload[:accountNumber]   = account_number   if account_number
+      payload[:accountName]     = account_name     if account_name
+      payload[:identity]        = identity         if identity
+      payload[:mobile]          = mobile           if mobile
+      payload[:appType]         = app_type         if app_type
+      payload[:redirectUrl]     = redirect_url     if redirect_url
+      payload[:requestId]       = request_id       if request_id
       payload[:merchantId]      = merchant_id      if merchant_id
       payload[:merchantName]    = merchant_name    if merchant_name
-      shop_id ||= @config.shop_id # one shop per project — same grouping as create_va
       payload[:merchantAddress] = merchant_address if merchant_address
-      payload[:shopId]          = shop_id          if shop_id
-      payload[:redirectUrl]     = redirect_url     if redirect_url
-      payload[:webhookUrl]      = webhook_url      if webhook_url
       payload[:vaPrefix]        = va_prefix        if va_prefix
       payload[:vaSuffix]        = va_suffix        if va_suffix
+      # One shop per project; an explicit arg wins over the configured default.
+      shop_id ||= @config.shop_id
+      payload[:shopId]          = shop_id          if shop_id
       post("/v1/create-va", payload)
     end
 
@@ -111,11 +113,20 @@ module Tingee
     end
 
     # POST /v1/delete-va — starts an unlink. Params ride the QUERY STRING (not the
-    # JSON body) and identify the bank by `bankName` (Tingee's short bank CODE, e.g.
-    # "STB") — NOT bankBin. Verified live 2026-07-16; Tingee is inconsistent here
-    # (confirm-delete-va below takes the body instead). Returns {confirmId}.
-    def delete_va(bank_name:, va_account_number:)
-      request(:post, "/v1/delete-va", query: { bankName: bank_name, vaAccountNumber: va_account_number })
+    # JSON body); the bank is identified by `bankBin`, per the documented contract.
+    #
+    # A `bankName` variant (Tingee's short bank CODE, e.g. "STB") also returns a
+    # confirmId AND triggers the bank's OTP, so it looks like it worked — but the
+    # session it creates cannot be confirmed: #confirm_delete_va then 400s with
+    # "Lỗi hệ thống phương thức xác thực" (seen live 2026-07-17). Do not reintroduce
+    # it. Unlink is the only way to stop Tingee's per-webhook billing, so an unlink
+    # that silently cannot complete is expensive.
+    #
+    # Returns {confirmId} (OTP banks). Bank-shape variations — TPB answers with an
+    # authorizeLink, VCB returns {} because it detaches immediately — are the caller's
+    # to branch on; see docs/tingee-api-reference.md §6.
+    def delete_va(bank_bin:, va_account_number:)
+      request(:post, "/v1/delete-va", query: { bankBin: bank_bin, vaAccountNumber: va_account_number })
     end
 
     # POST /v1/confirm-delete-va — finishes the unlink with the bank's OTP. Params

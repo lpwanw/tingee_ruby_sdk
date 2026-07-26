@@ -116,14 +116,69 @@ module Tingee
       refute JSON.parse(c.requests.first[:body]).key?("shopId")
     end
 
-    def test_create_va_vcb_falls_back_to_the_configured_shop_id_explicit_arg_wins
-      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[]}'), shop_id: 252011)
-      c.create_va_vcb(account_number: "0912323232", mobile: "0987665555", request_id: "req-3")
-      assert_equal 252011, JSON.parse(c.requests.first[:body])["shopId"]
-
-      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[]}'), shop_id: 252011)
-      c.create_va_vcb(account_number: "0912323232", mobile: "0987665555", request_id: "req-4", shop_id: 999)
+    def test_create_va_explicit_shop_id_wins_over_the_configured_default
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":{"confirmId":"123"}}'), shop_id: 252011)
+      c.create_va(bank_bin: "970436", webhook_url: "https://example.com/webhooks/tingee", shop_id: 999)
       assert_equal 999, JSON.parse(c.requests.first[:body])["shopId"]
+    end
+
+    # Redirect-authorize bank (VCB): appType "baas" + redirectUrl make create-va answer
+    # with a deepLink instead of sending an OTP; the result arrives on the webhook.
+    def test_create_va_sends_the_redirect_authorize_fields_and_returns_the_deep_link
+      c = FakeClient.new(FakeRes.new("200",
+        '{"code":"00","message":"Success","data":[{"confirmId":"r1","deepLink":"vcbpartner://x"}]}'))
+      data = c.create_va(bank_bin: "970436", account_number: "0912323232", mobile: "0987665555",
+        webhook_url: "https://example.com/webhooks/tingee", app_type: "baas",
+        redirect_url: "https://example.com/settings/bank", request_id: "req-1")
+
+      body = JSON.parse(c.requests.first[:body])
+      assert_equal "baas", body["appType"]
+      assert_equal "https://example.com/settings/bank", body["redirectUrl"]
+      assert_equal "req-1", body["requestId"]
+      assert_equal "970436", body["bankBin"]
+      assert_equal [ { "confirmId" => "r1", "deepLink" => "vcbpartner://x" } ], data
+    end
+
+    # No-account-field bank (TPB): the owner picks the account on the bank's own web,
+    # so none of the account/identity params exist in its contract — they must be
+    # absent from the payload, not sent as nulls.
+    def test_create_va_omits_every_account_field_the_caller_did_not_supply
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[{"authorizeLink":"https://tpb/x"}]}'))
+      c.create_va(bank_bin: "970423", webhook_url: "https://example.com/webhooks/tingee",
+        app_type: "baas", redirect_url: "https://example.com/settings/bank", request_id: "req-2")
+
+      assert_equal({
+        "accountType" => "personal-account", "bankBin" => "970423",
+        "isNotifyAccountNumber" => false, "webhookUrl" => "https://example.com/webhooks/tingee",
+        "appType" => "baas", "redirectUrl" => "https://example.com/settings/bank",
+        "requestId" => "req-2"
+      }, JSON.parse(c.requests.first[:body]))
+    end
+
+    # An OTP bank never gets the redirect-authorize params it has no contract for.
+    def test_create_va_omits_redirect_authorize_fields_for_a_plain_otp_bank
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":{"confirmId":"123"}}'))
+      c.create_va(bank_bin: "970403", account_number: "0011", account_name: "LE PHUONG TAY",
+        identity: "012345678901", mobile: "0393203261", webhook_url: "https://example.com/webhooks/tingee")
+
+      body = JSON.parse(c.requests.first[:body])
+      refute body.key?("appType")
+      refute body.key?("redirectUrl")
+      refute body.key?("requestId")
+    end
+
+    def test_create_va_includes_optional_merchant_and_va_prefix_fields_when_given
+      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[]}'))
+      c.create_va(bank_bin: "970436", webhook_url: "https://app/hook",
+        merchant_id: 140998, merchant_name: "Cửa hàng số 1", merchant_address: "Hà Nội",
+        va_prefix: "PRE", va_suffix: "SUF")
+
+      body = JSON.parse(c.requests.first[:body])
+      assert_equal 140998, body["merchantId"]
+      assert_equal "Cửa hàng số 1", body["merchantName"]
+      assert_equal "Hà Nội", body["merchantAddress"]
+      assert_equal "PRE", body["vaPrefix"]
+      assert_equal "SUF", body["vaSuffix"]
     end
 
     def test_confirm_va_sends_the_otp_and_returns_the_real_account_and_routing_key
@@ -152,13 +207,16 @@ module Tingee
 
     # --- unlink chain (delete-va = query params, confirm-delete-va = body) -------
 
-    def test_delete_va_sends_bank_name_and_va_account_number_as_query_params_not_the_body
+    # bankBin, NOT bankName: the bankName variant also returns a confirmId and fires the
+    # bank's OTP, but the session it opens cannot be confirmed — confirm-delete-va then
+    # 400s with "Lỗi hệ thống phương thức xác thực" (live, 2026-07-17).
+    def test_delete_va_sends_bank_bin_and_va_account_number_as_query_params_not_the_body
       c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":{"confirmId":"789"}}'))
-      data = c.delete_va(bank_name: "STB", va_account_number: "TNG1")
+      data = c.delete_va(bank_bin: "970403", va_account_number: "TNG1")
 
       assert_equal "789", data["confirmId"]
       uri = URI(c.requests.first[:uri])
-      assert_equal({ "bankName" => "STB", "vaAccountNumber" => "TNG1" }, URI.decode_www_form(uri.query).to_h)
+      assert_equal({ "bankBin" => "970403", "vaAccountNumber" => "TNG1" }, URI.decode_www_form(uri.query).to_h)
       assert_equal "{}", c.requests.first[:body] # bodyless signing convention still applies
     end
 
@@ -192,38 +250,5 @@ module Tingee
       }, body)
     end
 
-    def test_create_va_vcb_sends_the_vcb_defaults_and_no_otp_fields
-      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[{"confirmId":"r1","deepLink":"vcbpartner://x"}]}'))
-      data = c.create_va_vcb(account_number: "0912323232", mobile: "0987665555", request_id: "req-1")
-
-      body = JSON.parse(c.requests.first[:body])
-      assert_equal({
-        "requestId" => "req-1", "bankName" => "VCB", "accountNumber" => "0912323232",
-        "accountType" => "personal-account", "mobile" => "0987665555", "appType" => "baas"
-      }, body)
-      assert_equal [ { "confirmId" => "r1", "deepLink" => "vcbpartner://x" } ], data
-    end
-
-    def test_create_va_vcb_defaults_request_id_to_a_uuid_when_omitted
-      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[]}'))
-      c.create_va_vcb(account_number: "0912323232", mobile: "0987665555")
-
-      request_id = JSON.parse(c.requests.first[:body])["requestId"]
-      assert_match(/\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/, request_id)
-    end
-
-    def test_create_va_vcb_includes_optional_merchant_and_url_fields_when_given
-      c = FakeClient.new(FakeRes.new("200", '{"code":"00","message":"Success","data":[]}'))
-      c.create_va_vcb(account_number: "0912323232", mobile: "0987665555", request_id: "req-2",
-                      merchant_id: 140998, merchant_name: "Cửa hàng số 1", merchant_address: "Hà Nội",
-                      redirect_url: "finonemerchant://", webhook_url: "https://app/hook")
-
-      body = JSON.parse(c.requests.first[:body])
-      assert_equal 140998, body["merchantId"]
-      assert_equal "Cửa hàng số 1", body["merchantName"]
-      assert_equal "Hà Nội", body["merchantAddress"]
-      assert_equal "finonemerchant://", body["redirectUrl"]
-      assert_equal "https://app/hook", body["webhookUrl"]
-    end
   end
 end

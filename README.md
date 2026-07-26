@@ -87,6 +87,9 @@ time (`confirmId.startsWith`) — the manual chain below is the verified fallbac
 
 ### Bank linking — manual API chain (verified end-to-end)
 
+One `create_va` serves every bank; the bank decides which shape you get back. OTP banks
+are below, redirect-authorize banks (VCB/TPB) in the next section.
+
 ```ruby
 # 1. Start the link — the bank sends/pushes an OTP to `mobile`
 data = client.create_va(
@@ -109,28 +112,36 @@ r = client.register_notify(bank_bin: "970416", va_account_number: link["vaAccoun
 client.confirm_register_notify(bank_bin: "970416", confirm_id: r["confirmId"], otp_number: "654321")
 ```
 
-### Bank linking — VCB personal account (deepLink flow)
+### Bank linking — redirect-authorize banks (VCB, TPB)
 
-VCB has **no OTP confirm step**. `create_va_vcb` returns a `deepLink` you open in VCB
-Digibank; the customer confirms there and the result arrives **asynchronously on your
-webhook** with `status: "confirm-va-success" | "confirm-va-failed"`. See
-[docs/tingee-vcb-personal-link.md](docs/tingee-vcb-personal-link.md).
+Same `create_va`, different bank behavior: pass `app_type: "baas"` + `redirect_url` and
+the bank answers with an **authorize link** instead of sending an OTP. There is **no
+`confirm_va` step** — the owner approves in the bank's app/web and the result arrives
+**asynchronously on your webhook** as `status: "confirm-va-success" | "confirm-va-failed"`
+(see [§Webhooks](docs/tingee-api-reference.md#7-webhooks)).
 
 ```ruby
 # Pass and STORE your own request_id — it's echoed back on the webhook to correlate.
-data = client.create_va_vcb(
-  request_id:     my_link_id,            # defaults to SecureRandom.uuid if omitted
+# TPB returns NO confirmId at all, so your request_id is the ONLY correlation key.
+data = client.create_va(
+  bank_bin:       "970436",              # VCB
+  request_id:     my_link_id,
   account_number: "0912323232",
   mobile:         "0987665555",
-  merchant_id:    140998,
-  redirect_url:   "finonemerchant://",   # deep-link back to your app after confirm
+  app_type:       "baas",
+  redirect_url:   "https://yourapp.com/settings/bank",  # where the bank sends them back
   webhook_url:    "https://yourapp.com/webhooks/tingee"
 )
 data.first["deepLink"] # "vcbpartner://linkPaymentEvent?token=…" — open in VCB Digibank
+                       # (TPB answers with "authorizeLink" — an https page)
 
 # Later, on your webhook (verify the signature first — see below):
 #   payload["status"] == "confirm-va-success" → payload["vaAccountNumber"] is now linked
 ```
+
+Banks whose contract collects nothing from you (TPB — the owner picks the account on the
+bank's own web) simply omit `account_number`/`account_name`/`identity`/`mobile`; unset
+params are never sent.
 
 ### Listing linked accounts
 
@@ -141,12 +152,22 @@ client.get_va_paging # => {"totalCount"=>1, "items"=>[{"vaAccountNumber"=>"TNG�
 ### Unlinking
 
 ```ruby
-# Note Tingee's inconsistency: delete-va takes QUERY params and the bank's short
-# CODE ("STB"); confirm-delete-va takes a JSON BODY and identifies the bank by its
-# BIN ("970403"), not the code — bankName is ignored there. The gem handles it.
-r = client.delete_va(bank_name: "STB", va_account_number: "TNG…")
+# Note Tingee's inconsistency: delete-va takes QUERY params, confirm-delete-va takes a
+# JSON BODY. Both identify the bank by its BIN ("970403"). The gem handles the transport.
+r = client.delete_va(bank_bin: "970403", va_account_number: "TNG…")
 client.confirm_delete_va(bank_bin: "970403", confirm_id: r["confirmId"], otp_number: "111111")
 ```
+
+> **Do not pass the bank's short CODE (`bankName: "STB"`) to delete-va.** It looks like
+> it works — Tingee returns a `confirmId` and the bank really does send an OTP — but the
+> session it opens cannot be confirmed: `confirm-delete-va` then fails with
+> `"Lỗi hệ thống phương thức xác thực"` (live, 2026-07-17). Since unlinking is the only
+> way to stop per-webhook billing, an unlink that silently cannot complete keeps costing
+> money.
+
+Bank-shape variations on `delete_va`'s response are the caller's to branch on: OTP banks
+return `{confirmId}`, TPB returns an `authorizeLink`, and VCB returns `{}` because it
+detaches immediately — nothing left to confirm.
 
 ### Transaction history
 
