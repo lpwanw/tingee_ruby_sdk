@@ -309,7 +309,9 @@ normalized to code `"NETWORK"`, non-JSON gateway/WAF pages to `"HTTP_<status>"`.
   `500 "Field 'accountNumber' doesn't have a default value"` for a valid documented
   request (their dashboard mints the same QR fine). Not wrapped by this gem —
   plain transfers fire the webhook, so dynamic QRs aren't needed for payment
-  confirmation.
+  confirmation. Unnecessary anyway: `Tingee::VietQR.payload` mints the transfer QR
+  locally, and a plain transfer into the real account fires the webhook whatever
+  minted the QR.
 - Hosted bank-link JS SDK crashes
   `TypeError: e.confirmId.startsWith is not a function` (§2). Workaround: the raw
   create-va chain (§3).

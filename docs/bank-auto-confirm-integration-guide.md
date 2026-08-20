@@ -64,7 +64,7 @@ tenant/account model).
 | Column | Source | Purpose |
 |---|---|---|
 | `tingee_va_account_number` (string, **unique index**, nullable) | `confirm_va` → `vaAccountNumber` (`TNG…`) | THE routing key — webhooks route on it. Not a real account. |
-| `bank_account_number` | `confirm_va` → `accountNumber` | The REAL account — what QRs show, where money lands. |
+| `bank_account_number` | `confirm_va` → `accountNumber` | The REAL account — what QRs show (feed it to `Tingee::VietQR.payload`), where money lands. |
 | `tingee_bank_bin`, `tingee_shop_id` | `confirm_va` response | Needed for unlink / support. |
 | `tingee_linked_at` (datetime) | you | Link state + audit. |
 | `bank_auto_confirm_enabled` (boolean, default **false**) | you | Feature gate — launches OFF, flipped per account. |
@@ -231,6 +231,10 @@ App-side policy (deliberately not in the gem). The safe-by-construction rules:
 
 - **Memo convention**: your checkout/QR embeds a marker (`HD<invoice_id>`);
   extract with a permissive regex — banks append their own reference text.
+  Mint the QR with `Tingee::VietQR.payload` (no `img.vietqr.io` call needed) and
+  **store what `Tingee::VietQR.normalize_description` returns, then match on that** —
+  it ASCII-folds and truncates the memo, so matching your original un-normalized
+  string misses every payment.
 - **All must hold**: feature flag enabled for the tenant, invoice still
   open/draft, **exact amount match**, invoice belongs to the routed tenant
   (run the matcher inside the tenant scope so cross-tenant attribution is

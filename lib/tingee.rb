@@ -10,6 +10,7 @@ require_relative "tingee/version"
 require_relative "tingee/error"
 require_relative "tingee/configuration"
 require_relative "tingee/signature"
+require_relative "tingee/viet_qr"
 require_relative "tingee/client"
 
 module Tingee

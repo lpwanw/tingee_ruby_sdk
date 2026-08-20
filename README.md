@@ -182,6 +182,40 @@ client.get_transactions(start_time: "20260701000000", end_time: "20260710235959"
 
 Unlinking is also how you stop Tingee's per-webhook billing for an account.
 
+### VietQR payment codes
+
+Mint the payer-facing transfer QR locally — no `img.vietqr.io` round-trip, no API call:
+
+```ruby
+memo    = Tingee::VietQR.normalize_description("Thanh toán đơn HD#{invoice.id}")
+payload = Tingee::VietQR.payload(
+  bank_bin:       link.tingee_bank_bin,
+  account_number: link.bank_account_number,  # the REAL account from confirm_va
+  amount:         invoice.total,             # integer VND; omit or 0 for an open-amount QR
+  description:    memo
+)
+# => "00020101021138540010A0000007270124…630445F2"
+```
+
+The gem returns the **EMVCo payload string, not an image** — QR pixel encoding is
+Reed-Solomon plus masking, which would mean a runtime dependency, and this gem has
+none. Render it app-side:
+
+```ruby
+require "rqrcode"   # add to YOUR Gemfile — deliberately not a dependency of this gem
+RQRCode::QRCode.new(payload).as_png(size: 512)
+```
+
+> **`description` is ASCII-folded and truncated to 25 chars** (`Thanh toán` → `Thanh toan`),
+> because many bank scanners mangle or reject a non-ASCII memo. **Persist the string
+> `normalize_description` returns and match your webhook's `description` against that** —
+> matching against your original un-normalized text silently misses every payment.
+
+A plain transfer into the linked real account fires the payment webhook regardless of
+which tool minted the QR, so nothing here needs Tingee's (broken) dynamic-QR endpoint.
+Ported from [openhoangnc/vietqr](https://github.com/openhoangnc/vietqr) (MIT); the test
+suite reproduces that project's fixtures byte-exact.
+
 ## Webhook verification
 
 Tingee signs webhooks with `HMAC_SHA512(secret, timestamp + ":" + raw_body)` over
