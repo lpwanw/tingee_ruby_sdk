@@ -27,7 +27,7 @@ Official API docs: [developers.tingee.vn/docs/banking](https://developers.tingee
 
 ```ruby
 # Gemfile
-gem "tingee_ruby_sdk", "~> 0.1"
+gem "tingee_ruby_sdk", "~> 0.3"
 ```
 
 ```sh
