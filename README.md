@@ -195,11 +195,17 @@ memo    = Tingee::VietQR.normalize_description("Thanh toán đơn HD#{invoice.id
 payload = Tingee::VietQR.payload(
   bank_bin:       link.tingee_bank_bin,
   account_number: link.bank_account_number,  # the REAL account from confirm_va
-  amount:         invoice.total,             # integer VND; omit or 0 for an open-amount QR
+  amount:         invoice.total,             # whole VND; omit or 0 for an open-amount QR
   description:    memo
 )
-# => "00020101021138540010A0000007270124…630445F2"
+# => "00020101021138540010A00000072701240006…5802VN6225…6304<CRC>"
 ```
+
+`amount` is parsed, never coerced: anything that is not a whole non-negative number of
+dong raises `Tingee::Error` with code `"QR_INPUT"`. That includes the formatted strings
+a form field or CSV will hand you — `"1.234.567"` is rejected rather than silently
+becoming a **1 ₫** QR. `Integer`, whole `Float`/`BigDecimal`/`Rational`, and a bare
+digit string all work.
 
 The gem returns the **EMVCo payload string, not an image** — QR pixel encoding is
 Reed-Solomon plus masking, which would mean a runtime dependency, and this gem has
@@ -214,6 +220,9 @@ RQRCode::QRCode.new(payload).as_png(size: 512)
 > because many bank scanners mangle or reject a non-ASCII memo. **Persist the string
 > `normalize_description` returns and match your webhook's `description` against that** —
 > matching against your original un-normalized text silently misses every payment.
+>
+> A description that survives normalization as nothing (emoji or symbols only) raises
+> `"QR_INPUT"` rather than minting a QR with no reference the matcher could key on.
 
 A plain transfer into the linked real account fires the payment webhook regardless of
 which tool minted the QR, so nothing here needs Tingee's (broken) dynamic-QR endpoint.

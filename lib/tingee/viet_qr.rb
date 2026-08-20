@@ -30,15 +30,15 @@ module Tingee
                     tlv("01", validate_id!(account_number, "account_number"))
       merchant    = tlv("00", NAPAS_AID) + tlv("01", beneficiary) + tlv("02", SERVICE_CODE)
       memo        = normalize_description(description)
+      dong        = validate_amount!(amount)
 
       s  = "000201"          # payload format indicator
       s += "010211"          # point of initiation: 11 = static/reusable (12 = single-use)
       s += tlv("38", merchant)
       s += tlv("53", CURRENCY_VND)
       # `if amount` alone would be a porting bug: 0 is falsy in the JS original but
-      # truthy in Ruby, which would emit a bogus zero-amount field 54. to_i also keeps
-      # a Float total from rendering as "250000.0" — VND has no minor unit.
-      s += tlv("54", amount.to_i.to_s) if amount && amount.to_i.positive?
+      # truthy in Ruby, which would emit a bogus zero-amount field 54.
+      s += tlv("54", dong.to_s) if dong.positive?
       s += tlv("58", COUNTRY_VN)
       s += tlv("62", tlv("08", memo)) unless memo.empty?
       s += "6304"            # CRC tag + length, both covered by their own checksum
@@ -51,13 +51,44 @@ module Tingee
     # PERSIST WHAT THIS RETURNS. "Thanh toán" becomes "Thanh toan", so a webhook matcher
     # grepping your original un-normalized string silently misses every payment.
     def normalize_description(str)
-      str.to_s
-         .unicode_normalize(:nfd)
-         .gsub(/\p{Mn}/, "")        # strip combining diacritics
-         .tr("đĐ", "dD")            # not NFD-decomposable, needs its own mapping
-         .gsub(/[^\x20-\x7E]/, "")  # drop whatever is still non-ASCII-printable
-         .strip[0, MAX_DESCRIPTION]
-         .strip                     # truncation can leave a trailing space mid-word
+      normalized =
+        str.to_s
+           # A Latin-1 paste or a byte-truncated memo would otherwise raise a raw
+           # ArgumentError out of unicode_normalize, past any rescue Tingee::Error.
+           .encode("UTF-8", invalid: :replace, undef: :replace, replace: "")
+           .unicode_normalize(:nfkd) # NFKD, not NFD: also folds fullwidth ＨＤ１ to HD1
+           .gsub(/\p{Mn}/, "")       # drop combining diacritics: "toán" -> "toan"
+           .tr("đĐ", "dD")           # not decomposable, needs its own mapping
+           # Anything still non-ASCII becomes a space rather than vanishing, so an
+           # en dash or NBSP cannot silently fuse two words into one.
+           .gsub(/[^\x20-\x7E]/, " ")
+           .squeeze(" ")
+           .strip[0, MAX_DESCRIPTION]
+           .strip                    # truncation can leave a trailing space mid-word
+
+      # An unreferenced QR is unmatchable by construction (the auto-confirm matcher
+      # keys on this memo), so refuse to turn a memo the caller meant into nothing.
+      if normalized.empty? && !str.to_s.strip.empty?
+        raise Error.new("QR_INPUT", "description #{str.inspect} normalized to empty; a QR with no memo cannot be matched")
+      end
+
+      normalized
+    end
+
+    # VND has no minor unit, so an amount must be a whole non-negative number of dong.
+    # Deliberately NOT String#to_i, which coerces instead of parsing: "1.234.567" is
+    # the ordinary Vietnamese money format and to_i turns it into a 1-dong QR that the
+    # payer scans, pays, and nobody notices. nil (or 0) means an open-amount QR.
+    def validate_amount!(amount)
+      return 0 if amount.nil?
+
+      dong = case amount
+             when Numeric then (amount % 1).zero? ? amount.to_i : nil # Float/BigDecimal/Rational
+             when String  then amount.match?(/\A\d+\z/) ? amount.to_i : nil
+             end
+      raise Error.new("QR_INPUT", "amount must be a whole non-negative number of dong, got #{amount.inspect}") if dong.nil? || dong.negative?
+
+      dong
     end
 
     # EMVCo TLV: 2-char id + 2-char length + value. The length counts BYTES — the JS
