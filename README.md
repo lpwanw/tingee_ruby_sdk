@@ -1,6 +1,6 @@
 # tingee_ruby_sdk
 
-[![Gem Version](https://img.shields.io/gem/v/tingee_ruby_sdk)](https://rubygems.org/gems/tingee_ruby_sdk)
+[![Gem Version](https://badge.fury.io/rb/tingee_ruby_sdk.svg?icon=si%3Arubygems)](https://badge.fury.io/rb/tingee_ruby_sdk)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE.txt)
 
 Ruby client for the [Tingee](https://tingee.vn) BaaS API (`open-api.tingee.vn`) —
