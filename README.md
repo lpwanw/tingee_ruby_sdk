@@ -20,10 +20,14 @@ Official API docs: [developers.tingee.vn/docs/banking](https://developers.tingee
 
 ## Installation
 
-Not published to RubyGems yet — install from GitHub:
-
 ```ruby
 # Gemfile
+gem "tingee_ruby_sdk"
+```
+
+Or track the unreleased main branch:
+
+```ruby
 gem "tingee_ruby_sdk", github: "lpwanw/tingee_ruby_sdk"
 ```
 
