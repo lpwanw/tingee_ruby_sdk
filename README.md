@@ -1,5 +1,8 @@
 # tingee_ruby_sdk
 
+[![Gem Version](https://img.shields.io/gem/v/tingee_ruby_sdk)](https://rubygems.org/gems/tingee_ruby_sdk)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE.txt)
+
 Ruby client for the [Tingee](https://tingee.vn) BaaS API (`open-api.tingee.vn`) —
 bank account linking, virtual accounts, and payment webhooks for Vietnamese banks.
 Official API docs: [developers.tingee.vn/docs/banking](https://developers.tingee.vn/docs/banking/).
@@ -11,6 +14,8 @@ Official API docs: [developers.tingee.vn/docs/banking](https://developers.tingee
   not copied from marketing docs. The full observed contract, including Tingee's
   quirks and known bugs, lives in [`docs/tingee-api-reference.md`](docs/tingee-api-reference.md).
 - **Only verified endpoints are wrapped** — no speculative "complete SDK".
+- **VietQR payment codes are minted locally** — no `img.vietqr.io` round-trip, no API
+  call. See [VietQR payment codes](#vietqr-payment-codes).
 
 > **Building the full auto-confirm feature?** Follow
 > [`docs/bank-auto-confirm-integration-guide.md`](docs/bank-auto-confirm-integration-guide.md) —
@@ -22,19 +27,18 @@ Official API docs: [developers.tingee.vn/docs/banking](https://developers.tingee
 
 ```ruby
 # Gemfile
-gem "tingee_ruby_sdk"
+gem "tingee_ruby_sdk", "~> 0.1"
 ```
 
-Or track the unreleased main branch:
-
-```ruby
-gem "tingee_ruby_sdk", github: "lpwanw/tingee_ruby_sdk"
+```sh
+gem install tingee_ruby_sdk
 ```
 
-Or from a local checkout:
+Requires Ruby >= 3.2. Or track unreleased work:
 
 ```ruby
-gem "tingee_ruby_sdk", path: "../tingee_ruby_sdk"
+gem "tingee_ruby_sdk", github: "lpwanw/tingee_ruby_sdk"   # main
+gem "tingee_ruby_sdk", path: "../tingee_ruby_sdk"         # local checkout
 ```
 
 ## Configuration
